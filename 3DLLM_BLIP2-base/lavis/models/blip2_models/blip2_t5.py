@@ -2,7 +2,7 @@ import logging
 
 import torch
 import torch.nn as nn
-from torch.cuda.amp import autocast as autocast
+
 from transformers import T5TokenizerFast
 
 from lavis.common.registry import registry
@@ -92,7 +92,7 @@ class Blip2T5(Blip2Base):
 
         pos_model = PositionalEncoding1D(1408 // 3)
         x = torch.zeros(1, 256, 1408 // 3)
-        self.pos_embedding = pos_model(x).squeeze().cuda()
+        self.pos_embedding = pos_model(x).squeeze().to("mps")
 
         self.max_txt_len = max_txt_len
         self.prompt = ""
@@ -100,20 +100,20 @@ class Blip2T5(Blip2Base):
         self._lemmatizer = None
 
     def forward(self, samples):
-        with torch.cuda.amp.autocast(dtype=torch.float32):
-            pc_embeds = samples["pc_feat"]
+        # with torch.autocast("mps", dtype=torch.float32):
+        pc_embeds = samples["pc_feat"]
 
-        with torch.cuda.amp.autocast(dtype=torch.float32):
-            pc = samples["pc"].long()
-            all_pcs = torch.zeros((pc_embeds.shape))
-            for j in range(pc.shape[0]):
-                pcs = []
-                for i in range(3):
-                    pc_i = pc[j][:, i]
-                    pcs.append(self.pos_embedding[pc_i])
-                pcs = torch.cat(pcs, -1)
-                all_pcs[j][:, :1407] = pcs
-            all_pcs = all_pcs.cuda()
+        # with torch.autocast("mps", dtype=torch.float32):
+        pc = samples["pc"].long()
+        all_pcs = torch.zeros((pc_embeds.shape))
+        for j in range(pc.shape[0]):
+            pcs = []
+            for i in range(3):
+                pc_i = pc[j][:, i]
+                pcs.append(self.pos_embedding[pc_i])
+            pcs = torch.cat(pcs, -1)
+            all_pcs[j][:, :1407] = pcs
+        all_pcs = all_pcs.to("mps")
 
         pc_embeds = pc_embeds + 0.01 * all_pcs
         image_atts = torch.ones(pc_embeds.size()[:-1], dtype=torch.long).to(pc_embeds.device)
@@ -133,54 +133,54 @@ class Blip2T5(Blip2Base):
         else:
             text_input = samples["text_input"]
 
-        with torch.cuda.amp.autocast(dtype=torch.float32):
-            input_tokens = self.t5_tokenizer(
-                text_input,
-                padding="longest",
-                truncation=True,
-                max_length=400,
-                return_tensors="pt",
-            ).to(pc_embeds.device)
-            output_tokens = self.t5_tokenizer(
-                samples["answer"],
-                padding="longest",
-                truncation=True,
-                max_length=300,
-                return_tensors="pt",
-            ).to(pc_embeds.device)
-            batch_input_tokens_input_ids = []
-            batch_input_tokens_atts = []
-            batch_atts_t5 = []
-            batch_inputs_t5 = []
+        # with torch.autocast("mps", dtype=torch.float32):
+        input_tokens = self.t5_tokenizer(
+            text_input,
+            padding="longest",
+            truncation=True,
+            max_length=400,
+            return_tensors="pt",
+        ).to(pc_embeds.device)
+        output_tokens = self.t5_tokenizer(
+            samples["answer"],
+            padding="longest",
+            truncation=True,
+            max_length=300,
+            return_tensors="pt",
+        ).to(pc_embeds.device)
+        batch_input_tokens_input_ids = []
+        batch_input_tokens_atts = []
+        batch_atts_t5 = []
+        batch_inputs_t5 = []
 
-            for b, n in enumerate(samples["n_answers"]):
-                batch_input_tokens_input_ids += [input_tokens.input_ids[b]] * n
-                batch_input_tokens_atts += [input_tokens.attention_mask[b]] * n
-                batch_atts_t5 += [atts_t5[b]] * n
-                batch_inputs_t5 += [inputs_t5[b]] * n
+        for b, n in enumerate(samples["n_answers"]):
+            batch_input_tokens_input_ids += [input_tokens.input_ids[b]] * n
+            batch_input_tokens_atts += [input_tokens.attention_mask[b]] * n
+            batch_atts_t5 += [atts_t5[b]] * n
+            batch_inputs_t5 += [inputs_t5[b]] * n
 
-            batch_input_tokens_input_ids = torch.stack(batch_input_tokens_input_ids, dim=0)
-            batch_input_tokens_atts = torch.stack(batch_input_tokens_atts, dim=0)
-            batch_atts_t5 = torch.stack(batch_atts_t5, dim=0)
-            batch_inputs_t5 = torch.stack(batch_inputs_t5, dim=0)
+        batch_input_tokens_input_ids = torch.stack(batch_input_tokens_input_ids, dim=0)
+        batch_input_tokens_atts = torch.stack(batch_input_tokens_atts, dim=0)
+        batch_atts_t5 = torch.stack(batch_atts_t5, dim=0)
+        batch_inputs_t5 = torch.stack(batch_inputs_t5, dim=0)
 
-            encoder_atts = torch.cat([batch_atts_t5, batch_input_tokens_atts], dim=1)
+        encoder_atts = torch.cat([batch_atts_t5, batch_input_tokens_atts], dim=1)
 
-            targets = output_tokens.input_ids.masked_fill(
-                output_tokens.input_ids == self.t5_tokenizer.pad_token_id, -100
-            )
+        targets = output_tokens.input_ids.masked_fill(
+            output_tokens.input_ids == self.t5_tokenizer.pad_token_id, -100
+        )
 
-            inputs_embeds = self.t5_model.encoder.embed_tokens(batch_input_tokens_input_ids)
-            inputs_embeds = torch.cat([batch_inputs_t5, inputs_embeds], dim=1)
-            outputs = self.t5_model(
-                inputs_embeds=inputs_embeds,
-                attention_mask=encoder_atts,
-                decoder_attention_mask=output_tokens.attention_mask,
-                return_dict=True,
-                labels=targets,
-            )
-            loss = outputs.loss
-            return {"loss": loss}
+        inputs_embeds = self.t5_model.encoder.embed_tokens(batch_input_tokens_input_ids)
+        inputs_embeds = torch.cat([batch_inputs_t5, inputs_embeds], dim=1)
+        outputs = self.t5_model(
+            inputs_embeds=inputs_embeds,
+            attention_mask=encoder_atts,
+            decoder_attention_mask=output_tokens.attention_mask,
+            return_dict=True,
+            labels=targets,
+        )
+        loss = outputs.loss
+        return {"loss": loss}
 
     @torch.no_grad()
     def generate(
@@ -210,8 +210,8 @@ class Blip2T5(Blip2Base):
         Returns:
             captions (list): A list of strings of length batch_size * num_captions.
         """
-        with torch.cuda.amp.autocast(enabled=(self.device != torch.device("cpu")), dtype=torch.float32):
-            pc_embeds = samples["pc_feat"]
+        # with torch.autocast("mps", enabled=(self.device != torch.device("cpu")), dtype=torch.float32):
+        pc_embeds = samples["pc_feat"]
         image_atts = torch.ones(pc_embeds.size()[:-1], dtype=torch.long).to(pc_embeds.device)
 
         query_tokens = self.query_tokens.expand(pc_embeds.shape[0], -1, -1)
@@ -239,25 +239,24 @@ class Blip2T5(Blip2Base):
 
         encoder_atts = torch.cat([atts_t5, input_tokens.attention_mask], dim=1)
 
-        device_type = "cuda" if "cuda" in str(self.device) else "cpu"
-        with torch.cuda.amp.autocast(enabled=(self.device != torch.device("cpu")), dtype=torch.float32):
-            inputs_embeds = self.t5_model.encoder.embed_tokens(input_tokens.input_ids)
-            inputs_embeds = torch.cat([inputs_t5, inputs_embeds], dim=1)
+        # with torch.autocast("mps", enabled=True, dtype=torch.float32):
+        inputs_embeds = self.t5_model.encoder.embed_tokens(input_tokens.input_ids)
+        inputs_embeds = torch.cat([inputs_t5, inputs_embeds], dim=1)
 
-            outputs = self.t5_model.generate(
-                inputs_embeds=inputs_embeds,
-                attention_mask=encoder_atts,
-                do_sample=use_nucleus_sampling,
-                top_p=top_p,
-                temperature=temperature,
-                num_beams=num_beams,
-                max_new_tokens=max_length,
-                min_length=min_length,
-                repetition_penalty=repetition_penalty,
-                length_penalty=length_penalty,
-                num_return_sequences=num_captions,
-            )
-            output_text = self.t5_tokenizer.batch_decode(outputs, skip_special_tokens=True)
+        outputs = self.t5_model.generate(
+            inputs_embeds=inputs_embeds,
+            attention_mask=encoder_atts,
+            do_sample=use_nucleus_sampling,
+            top_p=top_p,
+            temperature=temperature,
+            num_beams=num_beams,
+            max_new_tokens=max_length,
+            min_length=min_length,
+            repetition_penalty=repetition_penalty,
+            length_penalty=length_penalty,
+            num_return_sequences=num_captions,
+        )
+        output_text = self.t5_tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
         return output_text
 
@@ -275,20 +274,21 @@ class Blip2T5(Blip2Base):
         repetition_penalty=1.0,
         **kwargs,
     ):
-        with torch.cuda.amp.autocast(enabled=(self.device != torch.device("cpu")), dtype=torch.float32):
-            pc_embeds = samples["pc_feat"]
+        
+        # with torch.autocast("mps", dtype=torch.float32):
+        pc_embeds = samples["pc_feat"]
 
-        with torch.cuda.amp.autocast(dtype=torch.float32):
-            pc = samples["pc"].long()
-            all_pcs = torch.zeros((pc_embeds.shape))
-            for j in range(pc.shape[0]):
-                pcs = []
-                for i in range(3):
-                    pc_i = pc[j][:, i]
-                    pcs.append(self.pos_embedding[pc_i])
-                pcs = torch.cat(pcs, -1)
-                all_pcs[j][:, :1407] = pcs
-            all_pcs = all_pcs.cuda()
+        # with torch.autocast("mps", dtype=torch.float32):
+        pc = samples["pc"].long()
+        all_pcs = torch.zeros((pc_embeds.shape))
+        for j in range(pc.shape[0]):
+            pcs = []
+            for i in range(3):
+                pc_i = pc[j][:, i]
+                pcs.append(self.pos_embedding[pc_i])
+            pcs = torch.cat(pcs, -1)
+            all_pcs[j][:, :1407] = pcs
+        all_pcs = all_pcs.to("mps")
 
         pc_embeds = pc_embeds + 0.01 * all_pcs
         image_atts = torch.ones(pc_embeds.size()[:-1], dtype=torch.long).to(pc_embeds.device)
@@ -318,23 +318,22 @@ class Blip2T5(Blip2Base):
 
         encoder_atts = torch.cat([atts_t5, input_tokens.attention_mask], dim=1)
         num_beams = 1
-        device_type = "cuda" if "cuda" in str(self.device) else "cpu"
-        with torch.cuda.amp.autocast(enabled=(self.device != torch.device("cpu")), dtype=torch.float32):
-            inputs_embeds = self.t5_model.encoder.embed_tokens(input_tokens.input_ids)
-            inputs_embeds = torch.cat([inputs_t5, inputs_embeds], dim=1)
+        # with torch.autocast("mps", enabled=True, dtype=torch.float32):
+        inputs_embeds = self.t5_model.encoder.embed_tokens(input_tokens.input_ids)
+        inputs_embeds = torch.cat([inputs_t5, inputs_embeds], dim=1)
 
-            outputs = self.t5_model.generate(
-                inputs_embeds=inputs_embeds,
-                attention_mask=encoder_atts,
-                do_sample=False,
-                num_beams=num_beams,
-                max_new_tokens=max_len,
-                min_length=min_len,
-                length_penalty=length_penalty,
-                repetition_penalty=repetition_penalty,
-                # for description, also use repetition penalty = 1.5
-            )
-            output_text = self.t5_tokenizer.batch_decode(outputs, skip_special_tokens=False)
+        outputs = self.t5_model.generate(
+            inputs_embeds=inputs_embeds,
+            attention_mask=encoder_atts,
+            do_sample=False,
+            num_beams=num_beams,
+            max_new_tokens=max_len,
+            min_length=min_len,
+            length_penalty=length_penalty,
+            repetition_penalty=repetition_penalty,
+            # for description, also use repetition penalty = 1.5
+        )
+        output_text = self.t5_tokenizer.batch_decode(outputs, skip_special_tokens=False)
 
         if self._apply_lemmatizer:
             output_text_new = self._lemmatize(output_text)

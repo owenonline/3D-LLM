@@ -14,8 +14,8 @@ parser.add_argument("--mode", default="object", type=str, choices=["object", "ro
 parser.add_argument("-v", "--visualize", action="store_true")
 args = parser.parse_args()
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-ckpt_path = "pretrain_blip2_sam_flant5xl_v1.pth"
+DEVICE = "mps"#"cuda" if torch.cuda.is_available() else "cpu"
+ckpt_path = "checkpoints/pretrain_blip2_sam_flant5xl_v2.pth"
 assert os.path.exists(ckpt_path), "Please specify the checkpoint path."
 
 obj_id_path = "assets/objaverse_subset_ids_100.json"
@@ -72,7 +72,7 @@ else:
     feature_path = os.path.join("assets", f"{room_id}.pt")
     points_path = os.path.join("assets", f"{room_id}.npy")
 
-prompt = np.random.choice(prompt)
+prompt = "Where is the pillow located?"#""np.random.choice(prompt)
 prompt = text_processor(prompt)
 pc_feature = torch.load(feature_path)  # (N, 1408)
 if isinstance(pc_feature, np.ndarray):

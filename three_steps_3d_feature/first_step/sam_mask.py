@@ -22,7 +22,7 @@ def main():
     torch.autograd.set_grad_enabled(False)
 
     sam = sam_model_registry["vit_h"](checkpoint=Path("sam_vit_h_4b8939.pth"))
-    sam.to(device="cuda")
+    sam.to(device="cpu")
     mask_generator = SamAutomaticMaskGenerator(
         model=sam,
         points_per_side=8,
@@ -39,10 +39,10 @@ def main():
     room_list = os.listdir(args.scene_dir_path)
 
     model, _, preprocess = open_clip.create_model_and_transforms("ViT-H-14", "laion2b_s32b_b79k")
-    model.cuda()
+    # model.cuda()
     model.eval()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")#torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
 
     dataset_dir = args.scene_dir_path
@@ -53,38 +53,40 @@ def main():
         data_list = glob.glob(dataset_path)
 
         for img_name in data_list:
+            print(img_name)
             img_base_name = os.path.basename(img_name)
 
-            try:
-                savefile = os.path.join(
-                    save_dir,
-                    room,
-                    os.path.basename(img_name).replace(".png", ".pt"),
-                )
-                if os.path.exists(savefile):
-                    continue
+            # try:
+            savefile = os.path.join(
+                save_dir,
+                room,
+                os.path.basename(img_name).replace(".png", ".pt"),
+            )
+            if os.path.exists(savefile):
+                continue
 
-                imgfile = img_name
-                img = cv2.imread(imgfile)
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                masks = mask_generator.generate(img)
-                cur_mask = masks[0]["segmentation"]
-                _savefile = os.path.join(
-                    save_dir,
-                    room,
-                    os.path.splitext(os.path.basename(imgfile))[0] + ".pt",
-                )
+            imgfile = img_name
+            img = cv2.imread(imgfile)
+            img = cv2.resize(img, (512, 512))
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            masks = mask_generator.generate(img)
+            cur_mask = masks[0]["segmentation"]
+            _savefile = os.path.join(
+                save_dir,
+                room,
+                os.path.splitext(os.path.basename(imgfile))[0] + ".pt",
+            )
 
-                mask_list = []
-                for mask_item in masks:
-                    mask_list.append(mask_item["segmentation"])
+            mask_list = []
+            for mask_item in masks:
+                mask_list.append(mask_item["segmentation"])
 
-                mask_np = np.asarray(mask_list)
-                mask_torch = torch.from_numpy(mask_np)
-                torch.save(mask_torch, _savefile)
-            except:
-                pass
-
+            mask_np = np.asarray(mask_list)
+            mask_torch = torch.from_numpy(mask_np)
+            print(mask_torch.shape)
+            torch.save(mask_torch, _savefile)
+            # except:
+            #     pass
 
 if __name__ == "__main__":
     main()
