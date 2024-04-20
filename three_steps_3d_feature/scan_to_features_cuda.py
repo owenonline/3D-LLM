@@ -22,6 +22,9 @@ import json
 
 from lavis.models.eva_vit import create_eva_vit_g
 
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:64,growth_interval_ms:1000,expandable_segments:True"
+
 LOAD_IMG_HEIGHT = 512
 LOAD_IMG_WIDTH = 512
 
