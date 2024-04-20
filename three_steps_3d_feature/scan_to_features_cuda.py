@@ -212,7 +212,7 @@ def blip_sam(save_dir_path, scene_dir_path, mask_dir_path):
         torch.save(outfeat, SEMIGLOBAL_FEAT_SAVE_FILE)
 
 def fuse_features(save_dir, dataset_dir, depth_map_dir, multiview_feat_dir, pose_dir, intrinsics_path, ds_info_path):
-    slam = PointFusion(odom="gradicp", dsratio=10, device="cuda", use_embeddings=True)
+    slam = PointFusion(odom="gradicp", dsratio=1000, device="cuda", use_embeddings=True)
 
     frame_cur, frame_prev = None, None
     pointclouds = Pointclouds(
