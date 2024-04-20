@@ -252,6 +252,7 @@ def fuse_features(save_dir, dataset_dir, depth_map_dir, multiview_feat_dir, pose
         # run pointfusion, which will fuse the current frame with the previous frame
         # this also fuses the pixel aligned features with the pointcloud, which will allow it to be updated over time
         pointclouds, _ = slam.step(pointclouds, frame_cur, frame_prev)
+        print(f"number of points: {pointclouds.points_padded.shape[1]}")
 
         torch.cuda.empty_cache()
         # frame_prev = frame_cur  # Uncomment this if you want to use the previous frame in your SLAM logic
