@@ -98,7 +98,7 @@ def blip_sam(save_dir_path, scene_dir_path, mask_dir_path):
         image = torch.tensor(raw_image[:512, :512]).permute(2, 0, 1)
         image = image.unsqueeze(0).to(device)
 
-        visual_encoder = create_eva_vit_g(512).to(device)
+        visual_encoder = create_eva_vit_g(512, precision='fp32').to(device)
         output = visual_encoder(image)
 
         global_feat = torch.tensor(output)
@@ -258,8 +258,8 @@ def main():
     dataset_dir = os.path.join(os.getcwd(), "datasets", args.scan_set_name, "rgb_images")
 
     mask_dir = os.path.join(os.getcwd(), "datasets", args.scan_set_name, "sam_masks")
-    os.makedirs(mask_dir, exist_ok=True)
-    create_masks(mask_dir, dataset_dir)
+    # os.makedirs(mask_dir, exist_ok=True)
+    # create_masks(mask_dir, dataset_dir)
 
     multiview_feat_dir = os.path.join(os.getcwd(), "datasets", args.scan_set_name, "multiview_features")
     os.makedirs(multiview_feat_dir, exist_ok=True)
