@@ -31,6 +31,7 @@ LOAD_IMG_WIDTH = 512
 def create_masks(save_dir, dataset_dir):
     torch.autograd.set_grad_enabled(False)
 
+    # load the SAM model
     sam = sam_model_registry["vit_h"](checkpoint=Path("sam_vit_h_4b8939.pth"))
     sam.to(device="cuda")
     mask_generator = SamAutomaticMaskGenerator(
@@ -50,21 +51,24 @@ def create_masks(save_dir, dataset_dir):
         )
         if os.path.exists(savefile):
             continue
-
+        
+        # read in the picture
         imgfile = img_name
         img = cv2.imread(imgfile)
         img = cv2.resize(img, (512, 512))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        # generate the masks for all the objects in the image
         masks = mask_generator.generate(img)
         _savefile = os.path.join(
                 save_dir,
                 os.path.splitext(os.path.basename(imgfile))[0] + ".pt",
             )
         
+        # stack the masks and save them as a tensor
         mask_list = []
         for mask_item in masks:
             mask_list.append(mask_item["segmentation"])
-
         mask_np = np.asarray(mask_list)
         mask_torch = torch.from_numpy(mask_np)
 
@@ -90,56 +94,54 @@ def blip_sam(save_dir_path, scene_dir_path, mask_dir_path):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     visual_encoder = create_eva_vit_g(512, precision='fp32').to(device)
     for i in range(50):
-    # for file in os.listdir(os.path.join(mask_dir_path)):
         file = f"{i}_rgb.pt"
         INPUT_IMAGE_PATH = os.path.join(scene_dir_path, f"{i}_rgb.png")
         SEMIGLOBAL_FEAT_SAVE_FILE = os.path.join(save_dir_path, file)
         if os.path.isfile(SEMIGLOBAL_FEAT_SAVE_FILE):
             continue
 
+        # read in the raw image
         raw_image = cv2.imread(INPUT_IMAGE_PATH)
         raw_image = cv2.resize(raw_image, (512, 512))
         image = torch.tensor(raw_image[:512, :512]).permute(2, 0, 1)
         image = image.unsqueeze(0).float().to(device)
 
+        # run the image through the visual encoder to get a global feature vector
         output = visual_encoder(image)
-
         global_feat = torch.tensor(output)
         global_feat = global_feat.half().to(device)
         global_feat = global_feat.mean(1)
-        # global_feat = global_feat[:, :-1, :].resize(1, 36, 36, 1408).permute((0, 3, 1, 2))
-        # m = nn.AdaptiveAvgPool2d((1, 1))
-        # global_feat = m(global_feat)
-        # global_feat = global_feat.squeeze(-1).squeeze(-1)
-
         global_feat = torch.nn.functional.normalize(global_feat, dim=-1)
         FEAT_DIM = global_feat.shape[-1]
 
         cosine_similarity = torch.nn.CosineSimilarity(dim=-1)
 
+        # load the saved masks
         MASK_LOAD_FILE = os.path.join(mask_dir_path, file)
         outfeat = torch.zeros(LOAD_IMG_HEIGHT, LOAD_IMG_WIDTH, FEAT_DIM, dtype=torch.half)
         mask = torch.load(MASK_LOAD_FILE).unsqueeze(0)
-        mask = mask[:, :, :512, :512]
-        num_masks = mask.shape[-3]
+        mask = mask[:, :, :512, :512] # crop to 512x512
+        num_masks = mask.shape[-3] # number of masks in the image
 
         rois = []
-        roi_similarities_with_global_vec = []
         roi_sim_per_unit_area = []
         feat_per_roi = []
         roi_nonzero_inds = []
 
         for _i in trange(num_masks):
+            # get the mask for the current object and calculate the top left and bottom right corner of the bounding box around it
             curmask = mask[0, _i].long()
             bbox, nonzero_inds = get_bbox_around_mask(curmask)
             x0, y0, x1, y1 = bbox
 
+            # calculate intersection over union to determine if the mask is too small; this happens if the SAM model picks up noise
             bbox_area = (x1 - x0 + 1) * (y1 - y0 + 1)
             img_area = LOAD_IMG_WIDTH * LOAD_IMG_HEIGHT
             iou = bbox_area / img_area
-
             if iou < 0.005:
                 continue
+
+            # crop the image to the bounding box and run it through the visual encoder to get the feature vector for the object
             roi = torch.ones((512, 512, 3))
             img_roi = torch.tensor(raw_image[:512, :512])[x0:x1, y0:y1]
             roi[x0:x1, y0:y1] = img_roi
@@ -148,21 +150,16 @@ def blip_sam(save_dir_path, scene_dir_path, mask_dir_path):
             roifeat = torch.tensor(roifeat)
             roifeat = roifeat.half().cuda()
             roifeat = roifeat.mean(1)
-            # roifeat = roifeat[:, :-1, :].resize(1, 36, 36, 1408).permute((0, 3, 1, 2))
-            # m = nn.AdaptiveAvgPool2d((1, 1))
-            # roifeat = m(roifeat)
-            # roifeat = roifeat.squeeze(-1).squeeze(-1)
-
             roifeat = torch.nn.functional.normalize(roifeat, dim=-1)
             feat_per_roi.append(roifeat)
             roi_nonzero_inds.append(nonzero_inds)
 
+            # calculate the cosine similarity between the global feature vector and the feature vector for the object and save that as well
             _sim = cosine_similarity(global_feat, roifeat)
-
             rois.append(torch.tensor(list(bbox)))
-            roi_similarities_with_global_vec.append(_sim)
             roi_sim_per_unit_area.append(_sim)
 
+        # run non-maximum suppression to get rid of overlapping masks
         rois = torch.stack(rois)
         scores = torch.cat(roi_sim_per_unit_area).to(rois.device)
         retained = torchvision.ops.nms(rois.float().cpu(), scores.float().cpu(), iou_threshold=1.0)
@@ -176,18 +173,23 @@ def blip_sam(save_dir_path, scene_dir_path, mask_dir_path):
         for _roiidx in range(retained.shape[0]):
             retained_nonzero_inds.append(roi_nonzero_inds[retained[_roiidx].item()])
 
+        # get the cosine similarity between the features of each object. This will be a square matrix where the (i, j)th entry is the cosine similarity between the ith and jth objects
         mask_sim_mat = torch.nn.functional.cosine_similarity(
             retained_feat[:, :, None], retained_feat.t()[None, :, :]
         )
-        mask_sim_mat.fill_diagonal_(0.0)
+        mask_sim_mat.fill_diagonal_(0.0) # set the diagonal to 0 because we don't want to consider the similarity between the same object
         mask_sim_mat = mask_sim_mat.mean(1)  # avg sim of each mask with each other mask
-        softmax_scores = retained_scores.cuda() - mask_sim_mat
-        softmax_scores = torch.nn.functional.softmax(softmax_scores, dim=0)
+        softmax_scores = retained_scores.cuda() - mask_sim_mat # subtracting the object-object relevance (which can be thought of as the relevance of the object in context of the other objects) object-scene similarity (which is kind of like global relevance) gives how much more or less important that object is than all the other objects
+        softmax_scores = torch.nn.functional.softmax(softmax_scores, dim=0) # apply softmax to get the final scores
         for _roiidx in range(retained.shape[0]):
+            # weighted sum of the global feature vector and the feature vector for the object
             _weighted_feat = (
                 softmax_scores[_roiidx] * global_feat + (1 - softmax_scores[_roiidx]) * retained_feat[_roiidx]
             )
             _weighted_feat = torch.nn.functional.normalize(_weighted_feat, dim=-1)
+
+            # put the weighted feature vector back into the image at each pixel where the mask is nonzero,
+            # creating the pixel-aligned object embeddings
             outfeat[retained_nonzero_inds[_roiidx][:, 0], retained_nonzero_inds[_roiidx][:, 1]] += (
                 _weighted_feat[0].detach().cpu().half()
             )
@@ -198,6 +200,7 @@ def blip_sam(save_dir_path, scene_dir_path, mask_dir_path):
                 dim=-1,
             ).half()
 
+        # make sure the pixel-aligned features are of size 512x512
         outfeat = outfeat.unsqueeze(0).float()  # interpolate is not implemented for float yet in pytorch
         outfeat = outfeat.permute(0, 3, 1, 2)  # 1, H, W, feat_dim -> 1, feat_dim, H, W
         outfeat = torch.nn.functional.interpolate(outfeat, [512, 512], mode="nearest")
@@ -209,7 +212,7 @@ def blip_sam(save_dir_path, scene_dir_path, mask_dir_path):
         torch.save(outfeat, SEMIGLOBAL_FEAT_SAVE_FILE)
 
 def fuse_features(save_dir, dataset_dir, depth_map_dir, multiview_feat_dir, pose_dir, intrinsics_path, ds_info_path):
-    slam = PointFusion(odom="gt", dsratio=1, device="cuda", use_embeddings=True)
+    slam = PointFusion(odom="gradicp", dsratio=10, device="cuda", use_embeddings=True)
 
     frame_cur, frame_prev = None, None
     pointclouds = Pointclouds(
@@ -237,6 +240,7 @@ def fuse_features(save_dir, dataset_dir, depth_map_dir, multiview_feat_dir, pose
             mode="nearest",
         )[0].permute(1, 2, 0).half().cuda()
 
+        # load the RGBD image
         frame_cur = RGBDImages(
             _color.unsqueeze(0).unsqueeze(0),
             _depth.unsqueeze(0).unsqueeze(0),
@@ -245,7 +249,10 @@ def fuse_features(save_dir, dataset_dir, depth_map_dir, multiview_feat_dir, pose
             embeddings=_embedding.unsqueeze(0).unsqueeze(0),
         )
         
+        # run pointfusion, which will fuse the current frame with the previous frame
+        # this also fuses the pixel aligned features with the pointcloud, which will allow it to be updated over time
         pointclouds, _ = slam.step(pointclouds, frame_cur, frame_prev)
+
         torch.cuda.empty_cache()
         # frame_prev = frame_cur  # Uncomment this if you want to use the previous frame in your SLAM logic
 
