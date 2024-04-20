@@ -85,6 +85,7 @@ def get_bbox_around_mask(mask):
 
 def blip_sam(save_dir_path, scene_dir_path, mask_dir_path):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    visual_encoder = create_eva_vit_g(512, precision='fp32').to(device)
     for i in range(100):
     # for file in os.listdir(os.path.join(mask_dir_path)):
         file = f"{i}_rgb.pt"
@@ -97,8 +98,7 @@ def blip_sam(save_dir_path, scene_dir_path, mask_dir_path):
         raw_image = cv2.resize(raw_image, (512, 512))
         image = torch.tensor(raw_image[:512, :512]).permute(2, 0, 1)
         image = image.unsqueeze(0).float().to(device)
-
-        visual_encoder = create_eva_vit_g(512, precision='fp32').to(device)
+        
         output = visual_encoder(image)
 
         global_feat = torch.tensor(output)
