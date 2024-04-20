@@ -255,7 +255,7 @@ def fuse_features(save_dir, dataset_dir, depth_map_dir, multiview_feat_dir, pose
         print(f"number of points: {pointclouds.points_padded.shape[1]}")
 
         torch.cuda.empty_cache()
-        # frame_prev = frame_cur  # Uncomment this if you want to use the previous frame in your SLAM logic
+        frame_prev = frame_cur
 
     pointclouds.save_to_h5(save_dir)
 
