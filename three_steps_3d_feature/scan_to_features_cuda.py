@@ -262,8 +262,8 @@ def main():
     # create_masks(mask_dir, dataset_dir)
 
     multiview_feat_dir = os.path.join(os.getcwd(), "datasets", args.scan_set_name, "multiview_features")
-    os.makedirs(multiview_feat_dir, exist_ok=True)
-    blip_sam(multiview_feat_dir, dataset_dir, mask_dir)
+    # os.makedirs(multiview_feat_dir, exist_ok=True)
+    # blip_sam(multiview_feat_dir, dataset_dir, mask_dir)
 
     fused_3d_feat_dir = os.path.join(os.getcwd(), "datasets", args.scan_set_name, "fused_3d_features")
     os.makedirs(fused_3d_feat_dir, exist_ok=True)
