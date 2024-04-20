@@ -1,13 +1,10 @@
 import os
 from pathlib import Path
-from PIL import Image
 import cv2
 import numpy as np
-import open_clip
 import torch
 import torchvision
-from torch import nn
-from segment_anything import SamAutomaticMaskGenerator, SamPredictor, sam_model_registry
+from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
 from tqdm import tqdm, trange
 import glob
 import argparse
