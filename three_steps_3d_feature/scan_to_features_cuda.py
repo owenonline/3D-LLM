@@ -96,7 +96,7 @@ def blip_sam(save_dir_path, scene_dir_path, mask_dir_path):
         raw_image = cv2.imread(INPUT_IMAGE_PATH)
         raw_image = cv2.resize(raw_image, (512, 512))
         image = torch.tensor(raw_image[:512, :512]).permute(2, 0, 1)
-        image = image.unsqueeze(0).to(device)
+        image = image.unsqueeze(0).float().to(device)
 
         visual_encoder = create_eva_vit_g(512, precision='fp32').to(device)
         output = visual_encoder(image)
