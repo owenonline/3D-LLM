@@ -215,8 +215,6 @@ def fuse_features(save_dir, dataset_dir, depth_map_dir, multiview_feat_dir, pose
 
     intrinsics = torch.from_numpy(np.load(intrinsics_path)).float()
 
-    ds_info = json.load(open(ds_info_path))
-
     for i in trange(50):#ds_info['num_views']):
         color_image = cv2.imread(os.path.join(dataset_dir, f"{i}_rgb.png"))
         color_image = cv2.resize(color_image, (512, 512))
