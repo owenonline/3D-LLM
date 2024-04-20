@@ -213,27 +213,26 @@ def fuse_features(save_dir, dataset_dir, depth_map_dir, multiview_feat_dir, pose
         device="cuda",
     )
 
-    intrinsics = torch.from_numpy(np.load(intrinsics_path)).float()
+    intrinsics = torch.from_numpy(np.load(intrinsics_path)).float().cuda()  # Make sure intrinsics are on CUDA
 
-    for i in trange(50):#ds_info['num_views']):
+    for i in trange(50):  # ds_info['num_views']):
         color_image = cv2.imread(os.path.join(dataset_dir, f"{i}_rgb.png"))
         color_image = cv2.resize(color_image, (512, 512))
 
         depth_image = np.load(os.path.join(depth_map_dir, f"{i}_depth.npy"))
         depth_image = cv2.resize(depth_image, (512, 512))
 
-        _color = torch.from_numpy(color_image).float()
-        _depth = torch.from_numpy(depth_image).float().unsqueeze(-1)
-        _pose = torch.from_numpy(np.load(os.path.join(pose_dir, f"{i}_pose.npy"))).float()
+        _color = torch.from_numpy(color_image).float().cuda()  # Move color to CUDA
+        _depth = torch.from_numpy(depth_image).float().unsqueeze(-1).cuda()  # Move depth to CUDA
+        _pose = torch.from_numpy(np.load(os.path.join(pose_dir, f"{i}_pose.npy"))).float().cuda()  # Move pose to CUDA
+
         _embedding = torch.load(os.path.join(multiview_feat_dir, f"{i}_rgb.pt"))
-        _embedding = _embedding.float()
+        _embedding = _embedding.float().cuda()  # Move embedding to CUDA right after load
         _embedding = torch.nn.functional.interpolate(
-            _embedding.permute(2, 0, 1).unsqueeze(0).float(),
+            _embedding.permute(2, 0, 1).unsqueeze(0),
             [512, 512],
             mode="nearest",
         )[0].permute(1, 2, 0).half().cuda()
-
-        # print(_color.shape, _depth.shape, _pose.shape, _embedding.shape)
 
         frame_cur = RGBDImages(
             _color.unsqueeze(0).unsqueeze(0),
@@ -245,7 +244,7 @@ def fuse_features(save_dir, dataset_dir, depth_map_dir, multiview_feat_dir, pose
         
         pointclouds, _ = slam.step(pointclouds, frame_cur, frame_prev)
         torch.cuda.empty_cache()
-        # frame_prev = frame_cur
+        # frame_prev = frame_cur  # Uncomment this if you want to use the previous frame in your SLAM logic
 
     pointclouds.save_to_h5(save_dir)
 
