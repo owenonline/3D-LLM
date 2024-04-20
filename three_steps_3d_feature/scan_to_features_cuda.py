@@ -86,7 +86,7 @@ def get_bbox_around_mask(mask):
 def blip_sam(save_dir_path, scene_dir_path, mask_dir_path):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     visual_encoder = create_eva_vit_g(512, precision='fp32').to(device)
-    for i in range(100):
+    for i in range(50):
     # for file in os.listdir(os.path.join(mask_dir_path)):
         file = f"{i}_rgb.pt"
         INPUT_IMAGE_PATH = os.path.join(scene_dir_path, f"{i}_rgb.png")
@@ -98,7 +98,7 @@ def blip_sam(save_dir_path, scene_dir_path, mask_dir_path):
         raw_image = cv2.resize(raw_image, (512, 512))
         image = torch.tensor(raw_image[:512, :512]).permute(2, 0, 1)
         image = image.unsqueeze(0).float().to(device)
-        
+
         output = visual_encoder(image)
 
         global_feat = torch.tensor(output)
@@ -217,7 +217,7 @@ def fuse_features(save_dir, dataset_dir, depth_map_dir, multiview_feat_dir, pose
 
     ds_info = json.load(open(ds_info_path))
 
-    for i in trange(10):#ds_info['num_views']):
+    for i in trange(50):#ds_info['num_views']):
         color_image = cv2.imread(os.path.join(dataset_dir, f"{i}_rgb.png"))
         color_image = cv2.resize(color_image, (512, 512))
 
